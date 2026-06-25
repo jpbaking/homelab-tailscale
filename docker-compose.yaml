@@ -1,0 +1,73 @@
+# Tailscale node for the homelab: subnet router + exit node.
+# Single-service stack. Config comes from .env via compose-helper.sh
+# (see README.md). Run with: ./compose-helper.sh up
+services:
+  tailscale:
+    container_name: tailscale
+    # Node name shown in the tailnet. Defaults if TS_HOSTNAME is unset.
+    hostname: "${TS_HOSTNAME:-home-tailscale-container}"
+    # Image tag pinned via .env (TS_IMAGE_TAG). "latest" by choice.
+    image: "tailscale/tailscale:${TS_IMAGE_TAG:-latest}"
+
+    # Keep the container running across reboots and crashes, but honour a
+    # manual stop (don't resurrect it until explicitly started again).
+    restart: unless-stopped
+
+    # ---- Networking mode -------------------------------------------------
+    # Runs in userspace/netstack mode (TS_USERSPACE=true in .env). tailscaled
+    # forwards subnet-router and exit-node traffic in userspace by dialing from
+    # the container's own network namespace, so no TUN device, no NET_ADMIN,
+    # and no kernel forwarding sysctls are required. Trade-off is throughput,
+    # not capability.
+    #
+    # To switch to kernel networking for line-rate forwarding: set
+    # TS_USERSPACE=false in .env and uncomment all three blocks below.
+    # devices:
+    #   - /dev/net/tun:/dev/net/tun
+    # cap_add:
+    #   - NET_ADMIN          # NET_RAW is not needed for normal tailscale operation
+    # sysctls:
+    #   net.ipv4.ip_forward: 1
+    #   net.ipv6.conf.all.forwarding: 1   # drop if IPv6 is disabled on the host
+
+    # Hardening: the container can't gain privileges beyond what it starts with.
+    # Safe here precisely because userspace mode adds no capabilities.
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      # Auth key from .env. The :? guard fails fast with a clear message if missing.
+      TS_AUTHKEY: "${TS_AUTHKEY:?TS_AUTHKEY must be set in .env}"
+      # Where tailscaled persists state inside the container (backed by the volume).
+      TS_STATE_DIR: "${TS_STATE_DIR:-/var/lib/tailscale}"
+      # true = userspace/netstack (see networking note above).
+      TS_USERSPACE: "${TS_USERSPACE:-false}"
+      # Don't let the tailnet override this host's DNS resolver.
+      TS_ACCEPT_DNS: "${TS_ACCEPT_DNS:-false}"
+      # Comma-separated subnets advertised as a subnet router (approve in admin console).
+      TS_ROUTES: "${TS_ROUTES}"
+      # Remaining `tailscale up` flags, e.g. --advertise-exit-node.
+      TS_EXTRA_ARGS: "${TS_EXTRA_ARGS}"
+
+    # Persist node identity/state so the container doesn't re-auth on every restart.
+    volumes:
+      - tailscale:/var/lib/tailscale
+
+    # Cap log growth so a chatty container can't fill the disk.
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: "100m"
+
+volumes:
+  tailscale:
+    name: tailscale
+    driver: local
+
+# Attach to an existing external network instead of the default bridge by
+# uncommenting and naming it here.
+# networks:
+#   default:
+#     name: master
+#     external: true
