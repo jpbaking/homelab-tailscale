@@ -1,3 +1,6 @@
 # Secrets — contains TS_AUTHKEY
 .env
 .config/.env
+
+# Local-only agent notes (contains real LAN details; never publish)
+AGENTS.md
