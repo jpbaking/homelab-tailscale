@@ -48,6 +48,20 @@ services:
       TS_ROUTES: "${TS_ROUTES}"
       # Remaining `tailscale up` flags, e.g. --advertise-exit-node.
       TS_EXTRA_ARGS: "${TS_EXTRA_ARGS}"
+      # Expose tailscaled's /healthz endpoint on loopback for the healthcheck below.
+      # Returns HTTP 200 only when the node is up and healthy, 503 otherwise.
+      # Bound to 127.0.0.1 so it's reachable in-container but never published.
+      TS_HEALTHCHECK_ADDR_PORT: "127.0.0.1:9002"
+
+    # Accurate health: polls tailscaled's own /healthz (more truthful than
+    # `tailscale status`, which can exit 0 while health warnings are active).
+    # busybox wget exits non-zero on a non-200 response, so this fails on 503.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9002/healthz"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
     # Persist node identity/state so the container doesn't re-auth on every restart.
     volumes:
